@@ -3,212 +3,216 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>バーコード一括生成ツール (ランダム対応版)</title>
-    <!-- Tailwind CSS for styling -->
+    <title>高速バーコードスキャナー</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- JsBarcode for barcode generation -->
-    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <!-- ZXing Library for high-speed scanning -->
+    <script type="text/javascript" src="https://unpkg.com/@zxing/library@latest"></script>
     <style>
-        /* A4 Print Styles */
-        @media print {
-            body {
-                background: white;
-                margin: 0;
-                padding: 0;
-            }
-            .no-print {
-                display: none !important;
-            }
-            .page-break {
-                page-break-after: always;
-            }
-            .a4-preview {
-                box-shadow: none !important;
-                margin: 0 !important;
-                padding: 10mm !important;
-                width: 100% !important;
-            }
+        #video-container {
+            position: relative;
+            overflow: hidden;
+            border-radius: 1rem;
+            background: #000;
+            aspect-ratio: 4 / 3;
         }
-        
-        .barcode-item {
+        #video {
             width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 15px;
-            border: 1px dashed #ccc;
-            border-radius: 8px;
-            background: #fff;
+            height: 100%;
+            object-fit: cover;
         }
-
-        /* Preview container styling */
-        .a4-preview {
-            width: 210mm;
-            min-height: 297mm;
-            padding: 10mm;
-            margin: 20px auto;
-            background: white;
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            align-content: start;
+        .scan-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            pointer-events: none;
+        }
+        .scan-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+            animation: scan 2s linear infinite;
+        }
+        @keyframes scan {
+            0% { top: 10%; }
+            50% { top: 90%; }
+            100% { top: 10%; }
+        }
+        .flash-success {
+            animation: flash 0.3s ease-out;
+        }
+        @keyframes flash {
+            0% { background: rgba(34, 197, 94, 0.5); }
+            100% { background: transparent; }
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen font-sans">
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
 
-    <!-- UI Controls (Hidden during print) -->
-    <div class="no-print bg-white shadow-lg p-6 mb-8 max-w-5xl mx-auto mt-8 rounded-2xl border border-gray-200">
-        <h1 class="text-2xl font-bold mb-6 text-gray-800 flex items-center">
-            <span class="mr-2">📊</span> バーコード一括作成ツール
+    <header class="p-4 bg-slate-800 shadow-lg flex justify-between items-center">
+        <h1 class="text-xl font-bold flex items-center">
+            <span class="mr-2">📷</span> 高速スキャナー
         </h1>
+        <div id="status" class="text-xs px-2 py-1 rounded bg-yellow-600">準備中...</div>
+    </header>
+
+    <main class="flex-1 p-4 max-w-2xl mx-auto w-full space-y-4">
         
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            <div class="space-y-4">
-                <h2 class="font-semibold text-blue-600 border-b pb-1">1. 生成設定</h2>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">生成モード</label>
-                    <select id="mode" class="w-full border rounded-md p-2 bg-gray-50 focus:ring-2 focus:ring-blue-500" onchange="toggleMode()">
-                        <option value="random">完全ランダム</option>
-                        <option value="sequence">連番（指定番号から）</option>
-                    </select>
-                </div>
-                <div id="startNumContainer" class="hidden">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">開始番号</label>
-                    <input type="number" id="startNum" value="100001" class="w-full border rounded-md p-2 focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div id="digitContainer">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">ランダム桁数</label>
-                    <input type="number" id="digits" value="8" min="4" max="12" class="w-full border rounded-md p-2 focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">生成個数</label>
-                    <input type="number" id="count" value="12" min="1" max="100" class="w-full border rounded-md p-2 focus:ring-2 focus:ring-blue-500">
-                </div>
+        <!-- Camera View -->
+        <div id="video-container" class="shadow-2xl relative">
+            <video id="video"></video>
+            <div class="scan-overlay">
+                <div class="scan-line"></div>
+                <div id="flash-layer" class="absolute inset-0 pointer-events-none"></div>
             </div>
-
-            <div class="space-y-4">
-                <h2 class="font-semibold text-green-600 border-b pb-1">2. デザイン設定</h2>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">バーコード形式</label>
-                    <select id="format" class="w-full border rounded-md p-2 bg-gray-50">
-                        <option value="CODE128">CODE128 (英数字対応)</option>
-                        <option value="EAN13">JAN/EAN-13 (数字のみ・13桁)</option>
-                        <option value="CODE39">CODE39</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">列数 (1行あたりの枚数)</label>
-                    <input type="number" id="columns" value="3" min="1" max="5" class="w-full border rounded-md p-2">
-                </div>
-            </div>
-
-            <div class="flex flex-col justify-end space-y-3">
-                <button onclick="generateBarcodes()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md">
-                    🔄 バーコードを再生成
-                </button>
-                <button onclick="window.print()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl transition duration-200 shadow-md">
-                    🖨️ 印刷 / PDF保存
-                </button>
+            <!-- Floating Indicator -->
+            <div id="last-result-badge" class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-full font-mono font-bold shadow-xl hidden">
+                00000000
             </div>
         </div>
-        
-        <div class="text-xs text-gray-400 bg-gray-50 p-3 rounded-lg">
-            <p>※ランダムモードでは、ボタンを押すたびに異なる数字が選ばれます。</p>
-            <p>※JAN13形式の場合、桁数は自動的に調整されます。</p>
-        </div>
-    </div>
 
-    <!-- Page Container -->
-    <div id="barcodePage" class="a4-preview shadow-2xl mb-20">
-        <!-- Barcodes will be generated here -->
-    </div>
+        <!-- Controls -->
+        <div class="flex gap-2">
+            <button id="startButton" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-bold transition">カメラ起動</button>
+            <button id="resetButton" class="bg-slate-700 hover:bg-slate-600 px-6 rounded-xl font-bold transition">クリア</button>
+        </div>
+
+        <!-- Result List -->
+        <div class="bg-slate-800 rounded-xl p-4 flex-1 overflow-hidden flex flex-col border border-slate-700">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">読み取り履歴</h2>
+                <button onclick="copyAll()" class="text-xs text-blue-400 hover:underline">すべてコピー</button>
+            </div>
+            <div id="results" class="space-y-2 overflow-y-auto max-h-60 font-mono">
+                <div class="text-slate-500 text-center py-8">履歴はありません</div>
+            </div>
+        </div>
+    </main>
 
     <script>
-        function toggleMode() {
-            const mode = document.getElementById('mode').value;
-            const startNumContainer = document.getElementById('startNumContainer');
-            const digitContainer = document.getElementById('digitContainer');
-            
-            if (mode === 'sequence') {
-                startNumContainer.classList.remove('hidden');
-                digitContainer.classList.add('hidden');
-            } else {
-                startNumContainer.classList.add('hidden');
-                digitContainer.classList.remove('hidden');
-            }
-        }
+        const codeReader = new ZXing.BrowserMultiFormatReader();
+        const videoElement = document.getElementById('video');
+        const startButton = document.getElementById('startButton');
+        const resetButton = document.getElementById('resetButton');
+        const resultList = document.getElementById('results');
+        const statusBadge = document.getElementById('status');
+        const flashLayer = document.getElementById('flash-layer');
+        const lastResultBadge = document.getElementById('last-result-badge');
 
-        function getRandomString(length) {
-            let result = '';
-            const characters = '0123456789';
-            for (let i = 0; i < length; i++) {
-                result += characters.charAt(Math.floor(Math.random() * characters.length));
-            }
-            return result;
-        }
+        let isScanning = false;
+        const scanHistory = new Set();
 
-        function generateBarcodes() {
-            const container = document.getElementById('barcodePage');
-            const mode = document.getElementById('mode').value;
-            const count = parseInt(document.getElementById('count').value);
-            const format = document.getElementById('format').value;
-            const columns = document.getElementById('columns').value;
-            const digits = parseInt(document.getElementById('digits').value);
-            const startNum = parseInt(document.getElementById('startNum').value);
-
-            // Update grid layout
-            container.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
-            
-            // Clear existing
-            container.innerHTML = '';
-
-            const usedCodes = new Set();
-
-            for (let i = 0; i < count; i++) {
-                let currentVal;
+        async function init() {
+            try {
+                const videoInputDevices = await codeReader.listVideoInputDevices();
+                statusBadge.innerText = "準備完了";
+                statusBadge.className = "text-xs px-2 py-1 rounded bg-green-600";
                 
-                if (mode === 'random') {
-                    // ユニークなランダム値を生成
-                    do {
-                        currentVal = getRandomString(format === 'EAN13' ? 12 : digits);
-                    } while (usedCodes.has(currentVal));
-                    usedCodes.add(currentVal);
-                } else {
-                    currentVal = (startNum + i).toString();
+                startButton.addEventListener('click', () => {
+                    if (isScanning) {
+                        stopScanner();
+                    } else {
+                        startScanner(videoInputDevices[videoInputDevices.length - 1].deviceId); // 背面カメラを優先
+                    }
+                });
+            } catch (err) {
+                console.error(err);
+                statusBadge.innerText = "エラー: カメラが見つかりません";
+                statusBadge.className = "text-xs px-2 py-1 rounded bg-red-600";
+            }
+        }
+
+        function startScanner(deviceId) {
+            isScanning = true;
+            startButton.innerText = "停止";
+            startButton.classList.replace('bg-blue-600', 'bg-red-600');
+
+            codeReader.decodeFromVideoDevice(deviceId, 'video', (result, err) => {
+                if (result) {
+                    onSuccess(result.getText());
                 }
-                
-                // Create item wrapper
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'barcode-item';
-                
-                // Create SVG element
-                const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-                svg.id = `barcode-${i}`;
-                itemDiv.appendChild(svg);
-                
-                container.appendChild(itemDiv);
-
-                try {
-                    JsBarcode(`#barcode-${i}`, currentVal, {
-                        format: format,
-                        width: 1.8,
-                        height: 50,
-                        displayValue: true,
-                        fontSize: 14,
-                        margin: 5,
-                        background: "transparent"
-                    });
-                } catch (e) {
-                    console.error("Error:", currentVal, e);
-                    itemDiv.innerHTML = `<span class="text-red-500 text-[10px]">Error: ${currentVal}</span>`;
+                if (err && !(err instanceof ZXing.NotFoundException)) {
+                    console.error(err);
                 }
+            });
+        }
+
+        function stopScanner() {
+            isScanning = false;
+            codeReader.reset();
+            startButton.innerText = "カメラ起動";
+            startButton.classList.replace('bg-red-600', 'bg-blue-600');
+            lastResultBadge.classList.add('hidden');
+        }
+
+        function onSuccess(text) {
+            // 短時間の連続読み取り重複防止（1秒間）
+            if (this.lastText === text && Date.now() - this.lastTime < 1000) return;
+            this.lastText = text;
+            this.lastTime = Date.now();
+
+            // UIフィードバック
+            flashLayer.classList.add('flash-success');
+            setTimeout(() => flashLayer.classList.remove('flash-success'), 300);
+            
+            lastResultBadge.innerText = text;
+            lastResultBadge.classList.remove('hidden');
+
+            // バイブレーション (モバイル用)
+            if (navigator.vibrate) navigator.vibrate(100);
+
+            // 履歴に追加
+            if (!scanHistory.has(text)) {
+                scanHistory.add(text);
+                if (scanHistory.size === 1) resultList.innerHTML = '';
+                
+                const entry = document.createElement('div');
+                entry.className = "bg-slate-700 p-3 rounded-lg flex justify-between items-center border-l-4 border-green-500 animate-slide-in";
+                entry.innerHTML = `
+                    <span class="font-bold text-lg">${text}</span>
+                    <span class="text-[10px] text-slate-400">${new Date().toLocaleTimeString()}</span>
+                `;
+                resultList.prepend(entry);
             }
         }
 
-        // Initial generation
-        window.onload = generateBarcodes;
+        resetButton.addEventListener('click', () => {
+            scanHistory.clear();
+            resultList.innerHTML = '<div class="text-slate-500 text-center py-8">履歴はありません</div>';
+            lastResultBadge.classList.add('hidden');
+        });
+
+        function copyAll() {
+            const text = Array.from(scanHistory).join('\n');
+            if (!text) return;
+            
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            
+            alert('コピーしました！');
+        }
+
+        init();
     </script>
+
+    <style>
+        .animate-slide-in {
+            animation: slideIn 0.2s ease-out;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+    </style>
 </body>
 </html>
